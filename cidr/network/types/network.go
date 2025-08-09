@@ -13,7 +13,9 @@ type Network interface {
 	BaseAddress() netip.Addr
 
 	// BroadcastAddress returns the broadcast address (last address in the network).
-	BroadcastAddress() netip.Addr
+	// If the network is IPv6, this is not applicable and will return nil.
+	// If the network is IPv4, it will return the broadcast address.
+	BroadcastAddress() *netip.Addr
 
 	// Netmask returns the subnet mask for this network.
 	Netmask() netip.Addr

@@ -172,23 +172,22 @@ func collectTabFields(v reflect.Value) []tabField {
 	for i := 0; i < t.NumField(); i++ {
 		sf := t.Field(i)
 
-		if sf.PkgPath != "" { // ignore unexported fields
+		if sf.PkgPath != "" { // unexported
 			continue
 		}
 
-		// Respect `tabs:"-"`
-		tag := sf.Tag.Get("tabs")
-		if tag == "-" {
+		tag := parseTabTag(sf)
+		if tag.skip {
 			continue
-		}
-		label := tag
-		if label == "" {
-			label = sf.Name
 		}
 
 		fv := v.Field(i)
+		if tag.omit && isZeroValue(fv) {
+			continue
+		}
+
 		valStr := stringifyField(fv)
-		out = append(out, tabField{label: label, value: valStr})
+		out = append(out, tabField{label: tag.label, value: valStr})
 	}
 	return out
 }
@@ -257,4 +256,50 @@ func stringifyField(v reflect.Value) string {
 		return fmt.Sprintf("%v", v.Interface())
 	}
 	return ""
+}
+
+type tabTag struct {
+	label string
+	omit  bool // omit field if zero-value
+	skip  bool // skip unconditionally (tab:"-")
+}
+
+func parseTabTag(sf reflect.StructField) tabTag {
+	// Prefer `tab`, fall back to `tabs`
+	raw := sf.Tag.Get("tab")
+	if raw == "" {
+		raw = sf.Tag.Get("tabs")
+	}
+	if raw == "-" {
+		return tabTag{skip: true}
+	}
+	parts := strings.Split(raw, ",")
+	label := strings.TrimSpace(parts[0])
+
+	var omit bool
+	for _, p := range parts[1:] {
+		switch strings.TrimSpace(p) {
+		case "omit", "omitempty": // support both spellings
+			omit = true
+		}
+	}
+	if label == "" {
+		label = sf.Name
+	}
+	return tabTag{label: label, omit: omit}
+}
+
+func isZeroValue(v reflect.Value) bool {
+	// Handle nil pointers/interfaces
+	for v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface {
+		if v.IsNil() {
+			return true
+		}
+		v = v.Elem()
+	}
+	// Prefer reflect.Value.IsZero where possible
+	if v.IsValid() {
+		return v.IsZero()
+	}
+	return true
 }

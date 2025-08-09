@@ -29,7 +29,7 @@ func (n *network) BaseAddress() netip.Addr {
 	return n.prefix.Masked().Addr()
 }
 
-func (n *network) BroadcastAddress() netip.Addr {
+func (n *network) BroadcastAddress() *netip.Addr {
 	p := n.prefix.Masked()
 	octets := p.Addr().As4()
 	ip := binary.BigEndian.Uint32(octets[:])
@@ -40,11 +40,24 @@ func (n *network) BroadcastAddress() netip.Addr {
 
 	var out [4]byte
 	binary.BigEndian.PutUint32(out[:], broadcast)
-	return netip.AddrFrom4(out)
+	addr := netip.AddrFrom4(out)
+	return &addr
 }
 
 func (n *network) Netmask() netip.Addr {
-	mask := ^uint32(0) << (n.prefix.Addr().BitLen() - n.prefix.Bits())
+	bits := n.prefix.Bits()
+	if bits == 0 {
+		return netip.IPv4Unspecified()
+	}
+	if bits == 32 {
+		var all [4]byte
+		for i := range all {
+			all[i] = 0xFF
+		}
+		return netip.AddrFrom4(all)
+	}
+
+	mask := ^uint32(0) << (n.prefix.Addr().BitLen() - bits)
 
 	var b [4]byte
 	binary.BigEndian.PutUint32(b[:], mask)
@@ -56,8 +69,7 @@ func (n *network) FirstUsableAddress() netip.Addr {
 }
 
 func (n *network) LastUsableAddress() netip.Addr {
-	broadcast := n.BroadcastAddress()
-	return broadcast.Prev()
+	return n.BroadcastAddress().Prev()
 }
 
 func (n *network) Count() *big.Int {
@@ -70,7 +82,9 @@ func (n *network) Contains(addrs []string) map[string]bool {
 	for _, addr := range addrs {
 		a, err := netip.ParseAddr(addr)
 		if err != nil || !a.Is4() {
-			fmt.Println("Warning: Invalid IPv4 address", addr, "-")
+			fmt.Println("Warning: Invalid IPv4 address:", addr)
+			r[addr] = false
+			continue
 		}
 		r[addr] = n.prefix.Contains(a)
 	}

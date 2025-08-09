@@ -30,7 +30,8 @@ var explainCmd = &cobra.Command{
 	Long: `Explain CIDR notation by providing the base address of the network.
 It is possible to pass any number of CIDR notated networks, and mixing v4 and v6 addresses.`,
 	Aliases: []string{"e"},
-	Example: "cidr explain 10.0.0.0/16",
+	Example: `cidr explain 10.0.0.0/16
+cidr explain 2001:db8::/32`,
 	Run: func(cmd *cobra.Command, args []string) {
 		f, err := output.GetFormatter(format)
 		if err != nil {

@@ -22,6 +22,13 @@ var containsCmd = &cobra.Command{
 			cmd.PrintErrf("Error: %s\n", err)
 			os.Exit(1)
 		}
-		cmd.Println(n.Contains(args[1:]))
+		r := n.Contains(args[1:])
+		for i, _ := range r {
+			if r[i] {
+				cmd.Printf("%s is contained in %s\n", i, args[0])
+			} else {
+				cmd.Printf("%s is NOT contained in %s\n", i, args[0])
+			}
+		}
 	},
 }
