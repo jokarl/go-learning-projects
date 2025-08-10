@@ -103,3 +103,42 @@ func (n *network) Contains(addrs []string) map[string]bool {
 	}
 	return r
 }
+
+func (n *network) Embed(s string) (netip.Addr, error) {
+	allowed := map[int]struct{}{32: {}, 40: {}, 48: {}, 56: {}, 64: {}, 96: {}}
+	bits := n.prefix.Bits()
+	if _, ok := allowed[bits]; !ok {
+		return netip.Addr{}, fmt.Errorf("invalid prefix length %d for IPv4 embedding; allowed: 32,40,48,56,64,96", bits)
+	}
+
+	v4, err := netip.ParseAddr(s)
+	if err != nil {
+		return netip.Addr{}, fmt.Errorf("invalid IPv4 address: %w", err)
+	}
+	if !v4.Is4() {
+		return netip.Addr{}, fmt.Errorf("address is not IPv4: %s", s)
+	}
+
+	v6b := n.prefix.Masked().Addr().As16()
+	v4b := v4.As4()
+
+	switch bits {
+	case 32: // v4 at bytes 4..7
+		copy(v6b[4:8], v4b[:])
+	case 40: // v4[0:3] at 5..7, v4[3] at 9
+		copy(v6b[5:8], v4b[:3])
+		v6b[9] = v4b[3]
+	case 48: // v4[0:2] at 6..7, v4[2:4] at 9..10
+		copy(v6b[6:8], v4b[:2])
+		copy(v6b[9:11], v4b[2:])
+	case 56: // v4[0] at 7, v4[1:4] at 9..11
+		v6b[7] = v4b[0]
+		copy(v6b[9:12], v4b[1:])
+	case 64: // v4 at 9..12
+		copy(v6b[9:13], v4b[:])
+	case 96: // v4 at 12..15
+		copy(v6b[12:16], v4b[:])
+	}
+
+	return netip.AddrFrom16(v6b), nil
+}

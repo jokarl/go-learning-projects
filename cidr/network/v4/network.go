@@ -90,3 +90,7 @@ func (n *network) Contains(addrs []string) map[string]bool {
 	}
 	return r
 }
+
+func (n *network) Embed(s string) (netip.Addr, error) {
+	return netip.Addr{}, fmt.Errorf("embedding not supported for IPv4 networks")
+}
