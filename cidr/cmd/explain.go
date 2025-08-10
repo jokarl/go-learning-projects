@@ -45,7 +45,7 @@ cidr explain 2001:db8::/32`,
 				cmd.PrintErrf("Error: %s\n", err)
 				os.Exit(1)
 			}
-			if err := n.Print(f); err != nil {
+			if err := network.PrintNetwork(n, f); err != nil {
 				cmd.PrintErrf("Error printing network %s: %s\n", arg, err)
 				os.Exit(1)
 			}

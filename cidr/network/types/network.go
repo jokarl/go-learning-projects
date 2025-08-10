@@ -3,8 +3,6 @@ package types
 import (
 	"math/big"
 	"net/netip"
-
-	"github.com/jokarl/go-learning-projects/cidr/output"
 )
 
 // Network represents an IP network with methods for calculating network properties.
@@ -36,7 +34,4 @@ type Network interface {
 	// This will return an error if the network is not an IPv6 network.
 	// See https://www.rfc-editor.org/rfc/rfc6052.html#section-2.2
 	Embed(string) (netip.Addr, error)
-
-	// Print formats the network information using the provided formatter.
-	Print(formatter output.Formatter) error
 }
