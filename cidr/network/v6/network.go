@@ -142,3 +142,8 @@ func (n *network) Embed(s string) (netip.Addr, error) {
 
 	return netip.AddrFrom16(v6b), nil
 }
+
+func (n *network) Divide(c int, vlsm bool) ([]netip.Prefix, error) {
+	//TODO implement me
+	panic("implement me")
+}

@@ -17,6 +17,11 @@ var countCmd = &cobra.Command{
 	Aliases: []string{"c", "num"},
 	Example: "cidr count 10.0.0.0/16",
 	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) < 1 {
+			cmd.PrintErrln("Usage: cidr count <CIDR>")
+			os.Exit(1)
+		}
+
 		for _, arg := range args {
 			n, err := network.New(arg)
 			if err != nil {

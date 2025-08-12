@@ -17,6 +17,11 @@ var containsCmd = &cobra.Command{
 	Aliases: []string{"in"},
 	Example: "cidr contains 10.0.0.0/16 10.0.0.1 10.0.0.2",
 	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) < 2 {
+			cmd.PrintErrln("Usage: cidr contains <CIDR> <IP1> <IP2> ...")
+			os.Exit(1)
+		}
+
 		n, err := network.New(args[0])
 		if err != nil {
 			cmd.PrintErrf("Error: %s\n", err)

@@ -3,10 +3,12 @@ package v4
 import (
 	"encoding/binary"
 	"fmt"
+	"math"
 	"math/big"
 	"net/netip"
 
 	"github.com/jokarl/go-learning-projects/cidr/network/types"
+	"github.com/jokarl/go-learning-projects/cidr/output"
 )
 
 type network struct {
@@ -49,7 +51,7 @@ func (n *network) Netmask() netip.Addr {
 	if bits == 0 {
 		return netip.IPv4Unspecified()
 	}
-	if bits == 32 {
+	if bits == n.prefix.Addr().BitLen() {
 		var all [4]byte
 		for i := range all {
 			all[i] = 0xFF
@@ -82,7 +84,7 @@ func (n *network) Contains(addrs []string) map[string]bool {
 	for _, addr := range addrs {
 		a, err := netip.ParseAddr(addr)
 		if err != nil || !a.Is4() {
-			fmt.Println("Warning: Invalid IPv4 address:", addr)
+			fmt.Println(output.Yellow, "Warning: Invalid IPv4 address:", addr, output.Reset)
 			r[addr] = false
 			continue
 		}
@@ -91,6 +93,34 @@ func (n *network) Contains(addrs []string) map[string]bool {
 	return r
 }
 
-func (n *network) Embed(s string) (netip.Addr, error) {
+func (n *network) Embed(_ string) (netip.Addr, error) {
 	return netip.Addr{}, fmt.Errorf("embedding not supported for IPv4 networks")
+}
+
+func (n *network) Divide(c int, vlsm bool) ([]netip.Prefix, error) {
+	// In mathematics, the binary logarithm is the power to
+	// which the number 2 must be raised to obtain the value c.
+	// E.g. trying to divide into 8 subnets requires 3 bits (2^3 = 8).
+	// E.g. trying to divide into 9 subnets requires 4 bits because:
+	// 2^3 = 8 (3 borrowed bits) can fit at most 8 subnets, so we need to borrow one more bit:
+	// 2^4 = 16 (4 borrowed bits) can fit 9 subnets, but also 16 subnets.
+	borrowHostBits := int(math.Ceil(math.Log2(float64(c))))
+	newPrefix := n.prefix.Bits() + borrowHostBits
+	if newPrefix > n.prefix.Addr().BitLen() {
+		return nil, fmt.Errorf("prefix would exceed %d bits", n.prefix.Addr().BitLen())
+	}
+
+	a4 := n.prefix.Masked().Addr().As4()
+	base := uint32(a4[0])<<24 | uint32(a4[1])<<16 | uint32(a4[2])<<8 | uint32(a4[3])
+	numAddr := uint32(1) << (n.prefix.Addr().BitLen() - newPrefix)
+
+	out := make([]netip.Prefix, c)
+	for i := 0; i < c; i++ {
+		mask := base + uint32(i)*numAddr
+		var b [4]byte
+		binary.BigEndian.PutUint32(b[:], mask)
+		out[i] = netip.PrefixFrom(netip.AddrFrom4(b), newPrefix)
+	}
+
+	return out, nil
 }

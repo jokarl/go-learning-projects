@@ -33,6 +33,11 @@ It is possible to pass any number of CIDR notated networks, and mixing v4 and v6
 	Example: `cidr explain 10.0.0.0/16
 cidr explain 2001:db8::/32`,
 	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) < 1 {
+			cmd.PrintErrln("Usage: cidr explain <CIDR> [<CIDR> ...]")
+			os.Exit(1)
+		}
+
 		f, err := output.GetFormatter(format)
 		if err != nil {
 			cmd.PrintErrf("Unknown output format: %s\n", format)

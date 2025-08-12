@@ -30,6 +30,11 @@ type Network interface {
 	// Contains checks if the network contains the specified IP addresses.
 	Contains([]string) map[string]bool
 
+	// Divide divides the network into smaller subnets.
+	// The `int` parameter specifies the number of subnets to create.
+	// If bool is true, it will use Variable Length Subnet Masking (VLSM).
+	Divide(int, bool) ([]netip.Prefix, error)
+
 	// Embed embeds an IPv4 address into an IPv6 address.
 	// This will return an error if the network is not an IPv6 network.
 	// See https://www.rfc-editor.org/rfc/rfc6052.html#section-2.2

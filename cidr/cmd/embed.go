@@ -14,9 +14,14 @@ func init() {
 var embedCmd = &cobra.Command{
 	Use:     "embed",
 	Short:   "Embed a v4 address in a v6 address",
-	Aliases: []string{"in"},
+	Aliases: []string{"e"},
 	Example: "cidr embed 2001:db8::/32 192.0.2.33",
 	Run: func(cmd *cobra.Command, args []string) {
+		if len(args) < 2 {
+			cmd.PrintErrln("Usage: cidr embed <v6 CIDR> <v4 address1> <v4 address2> ...")
+			os.Exit(1)
+		}
+
 		n, err := network.New(args[0])
 		if err != nil {
 			cmd.PrintErrf("Error: %s\n", err)
