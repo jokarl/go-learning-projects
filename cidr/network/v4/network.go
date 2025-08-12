@@ -4,11 +4,11 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"math"
 	"math/big"
 	"net/netip"
 	"sort"
 
+	"github.com/jokarl/go-learning-projects/cidr/math"
 	"github.com/jokarl/go-learning-projects/cidr/network/types"
 	"github.com/jokarl/go-learning-projects/cidr/output"
 )
@@ -35,16 +35,12 @@ func (n *network) BaseAddress() netip.Addr {
 
 func (n *network) BroadcastAddress() *netip.Addr {
 	p := n.prefix.Masked()
-	octets := p.Addr().As4()
-	ip := binary.BigEndian.Uint32(octets[:])
+	ip := u32(p.Addr())
 
-	m4 := n.Netmask().As4()
-	mask := binary.BigEndian.Uint32(m4[:])
+	mask := u32(n.Netmask())
 	broadcast := ip | ^mask
 
-	var out [4]byte
-	binary.BigEndian.PutUint32(out[:], broadcast)
-	addr := netip.AddrFrom4(out)
+	addr := addr4(broadcast)
 	return &addr
 }
 
@@ -104,7 +100,7 @@ func (n *network) Divide(c int, vlsm bool) ([]netip.Prefix, error) {
 		return n.divideVLSM(c)
 	}
 
-	borrowHostBits := nextPow2(c)
+	borrowHostBits := math.NextPow2(c)
 	newPrefix := n.prefix.Bits() + borrowHostBits
 	if newPrefix > n.prefix.Addr().BitLen() {
 		return nil, fmt.Errorf("prefix would exceed %d bits", n.prefix.Addr().BitLen())
@@ -133,7 +129,7 @@ func (n *network) divideVLSM(count int) ([]netip.Prefix, error) {
 	}
 
 	blocks := []netip.Prefix{orig} // [10.0.0.0/16]
-	largestIdx := func() int { // On first run, returns 0 with prefix 10.0.0.0/16
+	largestIdx := func() int {     // On first run, returns 0 with prefix 10.0.0.0/16
 		idx := 0
 		for i := 1; i < len(blocks); i++ {
 			if blocks[i].Bits() < blocks[idx].Bits() {
@@ -184,12 +180,64 @@ func (n *network) divideVLSM(count int) ([]netip.Prefix, error) {
 	return blocks, nil
 }
 
-func nextPow2(c int) int {
-	// In mathematics, the binary logarithm is the power to
-	// which the number 2 must be raised to obtain the value c.
-	// E.g. trying to divide into 8 subnets requires 3 bits (2^3 = 8).
-	// E.g. trying to divide into 9 subnets requires 4 bits because:
-	// 2^3 = 8 (3 borrowed bits) can fit at most 8 subnets, so we need to borrow one more bit:
-	// 2^4 = 16 (4 borrowed bits) can fit 9 subnets, but also 16 subnets.
-	return int(math.Ceil(math.Log2(float64(c))))
+func (n *network) VLSM(hostCounts []int) (allocated, leftover []netip.Prefix, err error) {
+	if !n.prefix.Addr().Is4() {
+		return nil, nil, fmt.Errorf("VLSM: IPv4 only")
+	}
+
+	// Copy + sort host counts (largest first) so big blocks get placed early.
+	counts := append([]int(nil), hostCounts...)
+	sort.Slice(counts, func(i, j int) bool { return counts[i] > counts[j] })
+
+	free := []netip.Prefix{n.prefix.Masked()}
+
+	for _, hosts := range counts {
+		if hosts <= 0 {
+			return nil, nil, fmt.Errorf("host count must be > 0 (got %d)", hosts)
+		}
+
+		// Classic VLSM: hosts + 2 for network+broadcast
+		required := hosts + 2
+		needBits := math.NextPow2(required) // 2^n >= required
+		wantLen := 32 - needBits
+		if wantLen < 0 {
+			return nil, nil, fmt.Errorf("host count %d too large for IPv4", hosts)
+		}
+
+		// Best-fit: pick the smallest free block that can produce wantLen (max Bits() subject to Bits() <= wantLen).
+		idx := -1
+		bestBits := -1
+		for i, b := range free {
+			if b.Bits() <= wantLen && b.Bits() > bestBits {
+				idx = i
+				bestBits = b.Bits()
+			}
+		}
+		if idx == -1 {
+			return nil, nil, fmt.Errorf("insufficient address space for %d hosts", hosts)
+		}
+
+		// Pop chosen block.
+		block := free[idx]
+		free = append(free[:idx], free[idx+1:]...)
+
+		// Split only as needed; keep right siblings as free space.
+		cur := block
+		for cur.Bits() < wantLen {
+			l, r := splitOnceV4(cur)
+			// Take left path for allocation; keep the right as free.
+			free = append(free, r)
+			cur = l
+		}
+		allocated = append(allocated, cur)
+	}
+
+	// Clean up + coalesce remaining free space for a nice, compact remainder view.
+	leftover = coalesceV4(free)
+
+	// Sort outputs: by address, then by prefix length (shorter prefix first).
+	sortPrefixesV4(allocated)
+	sortPrefixesV4(leftover)
+
+	return allocated, leftover, nil
 }

@@ -39,4 +39,9 @@ type Network interface {
 	// This will return an error if the network is not an IPv6 network.
 	// See https://www.rfc-editor.org/rfc/rfc6052.html#section-2.2
 	Embed(string) (netip.Addr, error)
+
+	// VLSM divides the network into subnets of variable lengths based on the provided sizes.
+	// The input is a slice of integers representing the sizes of each subnet.
+	// It returns two slices: one for the allocated prefixes and one for the remaining prefixes.
+	VLSM([]int) ([]netip.Prefix, []netip.Prefix, error)
 }

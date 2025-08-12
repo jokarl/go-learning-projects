@@ -3,11 +3,11 @@ package v6
 import (
 	"bytes"
 	"fmt"
-	"math"
 	"math/big"
 	"net/netip"
 	"sort"
 
+	"github.com/jokarl/go-learning-projects/cidr/math"
 	"github.com/jokarl/go-learning-projects/cidr/network/types"
 )
 
@@ -155,7 +155,7 @@ func (n *network) Divide(c int, vlsm bool) ([]netip.Prefix, error) {
 		return nil, fmt.Errorf("count must be > 0")
 	}
 
-	borrowHostBits := nextPow2(c)
+	borrowHostBits := math.NextPow2(c)
 	newPrefix := n.prefix.Bits() + borrowHostBits
 	const addrBits = 128
 
@@ -252,9 +252,63 @@ func (n *network) divideVLSM(count int) ([]netip.Prefix, error) {
 	return blocks, nil
 }
 
-func nextPow2(c int) int {
-	if c <= 1 {
-		return 0
+func (n *network) VLSM(hostCounts []int) (allocated, leftover []netip.Prefix, err error) {
+	addrBits := n.prefix.Addr().BitLen()
+
+	if !n.prefix.Addr().Is6() {
+		return nil, nil, fmt.Errorf("VLSM: IPv6 only")
 	}
-	return int(math.Ceil(math.Log2(float64(c))))
+
+	// Copy + sort largest-first so big requests place early (minimizes fragmentation).
+	counts := append([]int(nil), hostCounts...)
+	sort.Slice(counts, func(i, j int) bool { return counts[i] > counts[j] })
+
+	free := []netip.Prefix{n.prefix.Masked()}
+
+	for _, need := range counts {
+		if need <= 0 {
+			return nil, nil, fmt.Errorf("address count must be > 0 (got %d)", need)
+		}
+
+		// Smallest power-of-two block that fits 'need' addresses.
+		needBits := math.NextPow2(need)
+		if needBits < 0 {
+			needBits = 0
+		}
+		wantLen := addrBits - needBits
+		if wantLen < 0 {
+			return nil, nil, fmt.Errorf("request %d exceeds IPv6 space", need)
+		}
+
+		// Best-fit: pick the smallest free block that can yield wantLen
+		idx := -1
+		bestBits := -1
+		for i, b := range free {
+			if b.Bits() <= wantLen && b.Bits() > bestBits {
+				idx = i
+				bestBits = b.Bits()
+			}
+		}
+		if idx == -1 {
+			return nil, nil, fmt.Errorf("insufficient address space for %d", need)
+		}
+
+		// Pop chosen block.
+		block := free[idx]
+		free = append(free[:idx], free[idx+1:]...)
+
+		// Split only as needed; keep right siblings as free space.
+		cur := block
+		for cur.Bits() < wantLen {
+			l, r := splitOnceV6(cur)
+			free = append(free, r)
+			cur = l
+		}
+		allocated = append(allocated, cur)
+	}
+
+	leftover = coalesceV6(free)
+	sortPrefixesV6(allocated)
+	sortPrefixesV6(leftover)
+	return allocated, leftover, nil
 }
