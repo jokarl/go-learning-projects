@@ -1,9 +1,12 @@
 package v6
 
 import (
+	"bytes"
 	"fmt"
+	"math"
 	"math/big"
 	"net/netip"
+	"sort"
 
 	"github.com/jokarl/go-learning-projects/cidr/network/types"
 )
@@ -144,6 +147,114 @@ func (n *network) Embed(s string) (netip.Addr, error) {
 }
 
 func (n *network) Divide(c int, vlsm bool) ([]netip.Prefix, error) {
-	//TODO implement me
-	panic("implement me")
+	if vlsm {
+		return n.divideVLSM(c)
+	}
+
+	if c <= 0 {
+		return nil, fmt.Errorf("count must be > 0")
+	}
+
+	borrowHostBits := nextPow2(c)
+	newPrefix := n.prefix.Bits() + borrowHostBits
+	const addrBits = 128
+
+	if newPrefix > addrBits {
+		return nil, fmt.Errorf("prefix would exceed %d bits", addrBits)
+	}
+
+	base16 := n.prefix.Masked().Addr().As16()
+	base := new(big.Int).SetBytes(base16[:])
+
+	// step = 1 << (128 - newPrefix)
+	step := new(big.Int).Lsh(big.NewInt(1), uint(addrBits-newPrefix))
+
+	out := make([]netip.Prefix, c)
+	for i := 0; i < c; i++ {
+		inc := new(big.Int).Mul(step, big.NewInt(int64(i)))
+		sum := new(big.Int).Add(base, inc)
+
+		var b [16]byte
+		sb := sum.Bytes()
+		if len(sb) > 16 {
+			return nil, fmt.Errorf("address overflow while generating subnet %d", i)
+		}
+		copy(b[16-len(sb):], sb)
+		out[i] = netip.PrefixFrom(netip.AddrFrom16(b), newPrefix)
+	}
+	return out, nil
+}
+
+func (n *network) divideVLSM(count int) ([]netip.Prefix, error) {
+	if count <= 0 {
+		return nil, fmt.Errorf("count must be > 0")
+	}
+
+	addrBits := n.prefix.Addr().BitLen()
+	orig := n.prefix.Masked()
+	hostBits := addrBits - orig.Bits()
+
+	// Ensure count <= 2^hostBits
+	maxSubnets := new(big.Int).Lsh(big.NewInt(1), uint(hostBits))
+	if new(big.Int).SetInt64(int64(count)).Cmp(maxSubnets) > 0 {
+		return nil, fmt.Errorf("insufficient address space for %d subnets", count)
+	}
+
+	blocks := []netip.Prefix{orig}
+
+	largestIdx := func() int {
+		idx := 0
+		for i := 1; i < len(blocks); i++ {
+			if blocks[i].Bits() < blocks[idx].Bits() {
+				idx = i
+			}
+		}
+		return idx
+	}
+
+	for len(blocks) < count {
+		i := largestIdx()
+		p := blocks[i]
+		if p.Bits() == addrBits {
+			return nil, fmt.Errorf("cannot split /%d further", addrBits)
+		}
+
+		childLen := p.Bits() + 1
+		base := p.Masked().Addr().As16()
+		c1 := netip.PrefixFrom(netip.AddrFrom16(base), childLen)
+		size := new(big.Int).Lsh(big.NewInt(1), uint(addrBits-childLen))
+		baseBig := new(big.Int).SetBytes(base[:])
+		base2 := new(big.Int).Add(baseBig, size)
+
+		var b2 [16]byte
+		bs := base2.Bytes()
+		if len(bs) > 16 {
+			return nil, fmt.Errorf("address overflow while splitting %s", p.String())
+		}
+		copy(b2[16-len(bs):], bs)
+		c2 := netip.PrefixFrom(netip.AddrFrom16(b2), childLen)
+
+		blocks[i] = c1
+		blocks = append(blocks, c2)
+	}
+
+	// Sort the blocks by address and bits
+	// Larger blocks (with more bits) come first, then smaller blocks
+	sort.Slice(blocks, func(i, j int) bool {
+		ai := blocks[i].Addr().As16()
+		aj := blocks[j].Addr().As16()
+		if cmp := bytes.Compare(ai[:], aj[:]); cmp != 0 {
+			return cmp < 0
+		}
+		return blocks[i].Bits() < blocks[j].Bits()
+	})
+
+	return blocks, nil
+}
+
+func nextPow2(c int) int {
+	if c <= 1 {
+		return 0
+	}
+	return int(math.Ceil(math.Log2(float64(c))))
 }

@@ -1,6 +1,7 @@
 package v4
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math"
@@ -125,14 +126,14 @@ func (n *network) Divide(c int, vlsm bool) ([]netip.Prefix, error) {
 }
 
 func (n *network) divideVLSM(count int) ([]netip.Prefix, error) {
-	orig := n.prefix.Masked()
-	hostBits := n.prefix.Addr().BitLen() - orig.Bits()
-	if count > (1 << hostBits) {
+	orig := n.prefix.Masked()                          // 10.0.0.0/16
+	hostBits := n.prefix.Addr().BitLen() - orig.Bits() // 32 - 16 = 16
+	if count > (1 << uint(hostBits)) {                 // count = 5, 1 << 16 = 65536, so 5 > 65536
 		return nil, fmt.Errorf("insufficient address space for %d subnets", count)
 	}
 
-	blocks := []netip.Prefix{orig}
-	largestIdx := func() int {
+	blocks := []netip.Prefix{orig} // [10.0.0.0/16]
+	largestIdx := func() int { // On first run, returns 0 with prefix 10.0.0.0/16
 		idx := 0
 		for i := 1; i < len(blocks); i++ {
 			if blocks[i].Bits() < blocks[idx].Bits() {
@@ -143,36 +144,39 @@ func (n *network) divideVLSM(count int) ([]netip.Prefix, error) {
 	}
 
 	for len(blocks) < count {
-		i := largestIdx()
-		p := blocks[i]
+		i := largestIdx() // 0
+		p := blocks[i]    // 10.0.0/16
 		if p.Bits() == n.prefix.Addr().BitLen() {
 			return nil, fmt.Errorf("cannot split /32 further")
 		}
-		childLen := p.Bits() + 1
 
-		base := p.Masked().Addr()
+		childLen := p.Bits() + 1  // 16 --> 17
+		base := p.Masked().Addr() // 10.0.0.0
 		var a = base.As4()
-		size := uint32(1) << (32 - childLen)
 
-		c1 := netip.PrefixFrom(netip.AddrFrom4(a), childLen)
+		c1 := netip.PrefixFrom(netip.AddrFrom4(a), childLen) // 10.0.0.0/17
 
-		baseU := binary.BigEndian.Uint32(a[:])
-		baseU2 := baseU + size
+		baseU := binary.BigEndian.Uint32(a[:])                // 167772160 (10.0.0.0 as uint32)
+		size := uint32(1) << uint(p.Addr().BitLen()-childLen) // 2^(32-17) = 2^15 = 32768
+		baseU2 := baseU + size                                // 167772160 + 32768 = 167804928 (10.0.128.0)
 		var b [4]byte
-		binary.BigEndian.PutUint32(b[:], baseU2)
+		binary.BigEndian.PutUint32(b[:], baseU2) // Convert to byte array with 4 bytes (10.0.128.0)
 		c2 := netip.PrefixFrom(netip.AddrFrom4(b), childLen)
 
-		blocks[i] = c1
-		blocks = append(blocks, c2)
+		blocks[i] = c1              // 10.0.0.0/17
+		blocks = append(blocks, c2) // 10.0.128.0/17
+		// Next round will split the largest block again
+		// in this case 10.0.0.0/17 because both have the same amount of bits
+		// but appears first in the slice.
 	}
 
+	// Sort the blocks by address and bits
+	// Larger blocks (with more bits) come first, then smaller blocks
 	sort.Slice(blocks, func(i, j int) bool {
-		bi := blocks[i].Addr().As4()
-		ai := binary.BigEndian.Uint32(bi[:])
-		bj := blocks[j].Addr().As4()
-		aj := binary.BigEndian.Uint32(bj[:])
-		if ai != aj {
-			return ai < aj
+		ai := blocks[i].Addr().As4()
+		aj := blocks[j].Addr().As4()
+		if cmp := bytes.Compare(ai[:], aj[:]); cmp != 0 {
+			return cmp < 0
 		}
 		return blocks[i].Bits() < blocks[j].Bits()
 	})
